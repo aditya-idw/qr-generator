@@ -1,6 +1,6 @@
 // middleware/apiKeyAuth.js
-const knexConfig = require('../knexfile').development;
-const knex = require('knex')(knexConfig);
+const knex = require('../backend/db');
+const redis = require('../backend/cache');
 
 module.exports = async function apiKeyAuth(req, res, next) {
   const key = req.get('x-api-key');
@@ -30,7 +30,7 @@ module.exports = async function apiKeyAuth(req, res, next) {
   req.user = {
     userId: user.userId,
     email: user.email,
-    roles: user.roles || []  // make sure your Users table has a 'roles' JSONB column
+    roles: user.roles || []  // ensure roles column exists on Users
   };
 
   next();

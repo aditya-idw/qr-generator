@@ -1,18 +1,9 @@
 // backend/redirect.js
-require('dotenv').config();
-const knexConfig = require('../knexfile').development;
-const knex = require('knex')(knexConfig);
-const Redis = require('ioredis');
-const { fetch } = require('undici');
+const knex = require('./db');
+const redis = require('./cache');
 
-// Test mode flag
+// Detect test mode
 const isTest = process.env.NODE_ENV === 'test';
-
-// In-memory rate windows for test mode
-const rateWindows = isTest ? new Map() : null;
-
-// Initialize Redis client for distributed rate-limiting
-const redis = !isTest ? new Redis(process.env.REDIS_URL) : null;
 
 module.exports = async function redirectHandler(req, res) {
   const { key } = req.params;
@@ -21,77 +12,62 @@ module.exports = async function redirectHandler(req, res) {
 
   // Lookup the dynamic QR record
   const record = await knex('DynamicQR').where({ id: key }).first();
-  if (!record) {
-    return res.status(404).json({ error: 'QR code not found' });
-  }
+  if (!record) return res.status(404).json({ error: 'QR code not found' });
 
-  // 1) Expiry check
-  if (record.expiry && new Date(record.expiry) < new Date(now)) {
+  // Expiry check
+  if (record.expiry && new Date(record.expiry) < now) {
     return res.status(410).json({ error: 'QR code has expired' });
   }
 
-  // 2) Click cap enforcement
+  // Click cap enforcement
   if (record.clickCap != null && record.hits >= record.clickCap) {
     return res.status(403).json({ error: 'Click cap reached' });
   }
 
-  // 3) Rate limiting (test vs production)
+  // Rate limiting via Redis or in-memory stub
   if (record.rateLimit) {
     const { count, perMilliseconds } = record.rateLimit;
-    if (isTest) {
-      const windowKey = `${key}:${ip}`;
-      // Clear previous test data when record is new
-      if (record.hits === 0) {
-        rateWindows.delete(windowKey);
-      }
-      // In-memory sliding window
-      const timestamps = rateWindows.get(windowKey) || [];
-      const windowStart = now - perMilliseconds;
-      const recent = timestamps.filter(ts => ts > windowStart);
-      if (recent.length >= count) {
-        return res.status(429).json({ error: 'Rate limit exceeded' });
-      }
-      recent.push(now);
-      rateWindows.set(windowKey, recent);
-    } else {
-      // Redis-based sliding window
-      const windowKey = `rate:${key}:${ip}`;
-      const windowStart = now - perMilliseconds;
-      await redis.zremrangebyscore(windowKey, 0, windowStart);
-      const requests = await redis.zcard(windowKey);
-      if (requests >= count) {
-        return res.status(429).json({ error: 'Rate limit exceeded' });
-      }
-      await redis.zadd(windowKey, now, now);
-      await redis.pexpire(windowKey, perMilliseconds);
+    const windowKey = `${key}:${ip}`;
+
+    // Reset stub window for fresh records in test mode
+    if (isTest && record.hits === 0) {
+      await redis.zremrangebyscore(windowKey, 0, now);
     }
+
+    await redis.zremrangebyscore(windowKey, 0, now - perMilliseconds);
+    const current = await redis.zcard(windowKey);
+    if (current >= count) {
+      return res.status(429).json({ error: 'Rate limit exceeded' });
+    }
+    await redis.zadd(windowKey, now, `${now}`);
+    await redis.pexpire(windowKey, perMilliseconds);
   }
 
-  // 4) Geo-fence redirection
+  // Geo-fence redirection
   if (record.geoFence) {
     const region = req.headers['x-region'];
     const gf = record.geoFence;
     let targetUrl;
     if (Array.isArray(gf.allowedRegions)) {
-      targetUrl = gf.allowedRegions.includes(region) ? record.url : gf.fallbackUrl;
+      targetUrl = gf.allowedRegions.includes(region)
+        ? record.url
+        : gf.fallbackUrl;
     } else {
       targetUrl = gf.allowedRegions[region] || gf.fallbackUrl;
     }
-    if (!targetUrl) {
-      return res.status(403).json({ error: 'Region not allowed' });
-    }
+    if (!targetUrl) return res.status(403).json({ error: 'Region not allowed' });
     record.url = targetUrl;
   }
 
-  // 5) Password protection
+  // Password protection
   if (record.passwordProtected) {
-    const provided = req.query.pw || req.headers['x-qr-password'];
-    if (!provided || provided !== record.password) {
+    const provided = req.query.pw || req.get('x-qr-password');
+    if (provided !== record.password) {
       return res.status(401).json({ error: 'Password required or incorrect' });
     }
   }
 
-  // 6) Device/User-Agent routing
+  // Device/User-Agent routing
   if (record.deviceRouting) {
     const ua = req.get('User-Agent') || '';
     const isMobile = /Mobi|Android/i.test(ua);
@@ -100,13 +76,11 @@ module.exports = async function redirectHandler(req, res) {
       : record.deviceRouting.desktopUrl || record.url;
   }
 
-  // 7) Time-of-day / Day-of-week routing
+  // Time-of-day / Day-of-week routing
   if (record.timeRouting) {
     const date = new Date();
-    const day = date.getDay();
-    const hr = date.getHours();
+    const day = date.getDay(), hr = date.getHours();
     const tr = record.timeRouting;
-
     if ((day === 0 || day === 6) && tr.weekendsUrl) {
       record.url = tr.weekendsUrl;
     } else if (hr >= 9 && hr < 17 && tr.businessHoursUrl) {
@@ -116,13 +90,20 @@ module.exports = async function redirectHandler(req, res) {
     }
   }
 
-  // 8) Analytics webhook (skip in test)
+  // Analytics webhook (skip in test)
   if (!isTest && record.webhookUrl) {
-    fetch(record.webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ key, ip, timestamp: now, userAgent: req.get('User-Agent') }),
-    }).catch(err => console.error('Webhook error:', err));
+    require('undici')
+      .fetch(record.webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          key,
+          timestamp: new Date().toISOString(),
+          ip,
+          userAgent: req.get('User-Agent'),
+        }),
+      })
+      .catch(err => console.error('Webhook error:', err));
   }
 
   // Increment hits
