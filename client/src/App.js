@@ -1,3 +1,4 @@
+// client/src/App.js
 import React, { useState } from 'react';
 import './App.css';
 
@@ -6,36 +7,44 @@ function App() {
   const [format, setFormat] = useState('svg');
   const [qr, setQr] = useState(null);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
   async function generate() {
     setError('');
     setQr(null);
-    if (!payload) {
+
+    if (!payload.trim()) {
       setError('Enter a URL or text to encode.');
       return;
     }
 
+    setLoading(true);
     try {
-      const res = await fetch('/generateQr', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
-        // for GET, we put parameters in query string:
+      // Build query string for GET
+      const qs = new URLSearchParams({
+        payloadType: 'url',
+        payloadData: payload,
+        format,
       });
 
-      // Instead, build the URL manually:
-      const qs = new URLSearchParams({ payloadType: 'url', payloadData: payload, format });
-      const r = await fetch(`/generateQr?${qs.toString()}`);
-      if (!r.ok) throw new Error(await r.text());
+      const res = await fetch(`/generateQr?${qs.toString()}`);
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || res.statusText);
+      }
+
       if (format === 'svg') {
-        const text = await r.text();
+        const text = await res.text();
         setQr({ type: 'svg', data: text });
       } else {
-        const blob = await r.blob();
+        const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setQr({ type: 'img', data: url });
       }
     } catch (e) {
       setError(e.message);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -63,7 +72,9 @@ function App() {
           </select>
         </label>
 
-        <button onClick={generate}>Generate QR</button>
+        <button onClick={generate} disabled={loading}>
+          {loading ? 'Generating…' : 'Generate QR'}
+        </button>
       </div>
 
       {error && <div className="error">{error}</div>}
