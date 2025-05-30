@@ -2,8 +2,8 @@
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const knex = require('./db');
-const auth = require('../middleware/auth');
-const { requireRole } = require('../middleware/permissions');
+const auth = require('../../middleware/auth');
+const { requireRole } = require('../../middleware/permissions');
 
 const router = express.Router();
 
