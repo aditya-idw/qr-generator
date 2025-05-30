@@ -2,9 +2,13 @@
 const knexConfig = require('../knexfile').development;
 const knex = require('knex')(knexConfig);
 
+// In-memory store for timestamps: { "<key>:<ip>": [timestamp, ...] }
+const rateWindows = new Map();
+
 module.exports = async function redirectHandler(req, res) {
   const { key } = req.params;
-  const now = new Date();
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
 
   // Lookup the dynamic QR record
   const record = await knex('DynamicQR').where({ id: key }).first();
@@ -22,26 +26,35 @@ module.exports = async function redirectHandler(req, res) {
     return res.status(403).json({ error: 'Click cap reached' });
   }
 
-  // 3) Rate limiting (TODO: implement proper windowed counter)
+  // 3) Rate limiting
   if (record.rateLimit) {
-    // Example placeholder: record.rateLimit = { count: N, perMilliseconds: M }
-    // You need to track per-IP or globally how many times within window
-    // For now, skip or add your own implementation here.
+    const { count, perMilliseconds } = record.rateLimit;
+    const windowKey = `${key}:${ip}`;
+    const timestamps = rateWindows.get(windowKey) || [];
+
+    // Filter out timestamps outside the sliding window
+    const windowStart = now - perMilliseconds;
+    const recent = timestamps.filter(ts => ts > windowStart);
+
+    if (recent.length >= count) {
+      return res.status(429).json({ error: 'Rate limit exceeded' });
+    }
+
+    // Record this hit
+    recent.push(now);
+    rateWindows.set(windowKey, recent);
   }
 
   // 4) Geo-fence redirection
   if (record.geoFence) {
-    // Expect a header 'x-region' with country code (e.g. "US","IN")
     const region = req.headers['x-region'];
     const gf = record.geoFence;
     let targetUrl;
     if (Array.isArray(gf.allowedRegions)) {
-      // single redirect URL for allowed regions
       targetUrl = gf.allowedRegions.includes(region)
         ? record.url
         : gf.fallbackUrl;
     } else {
-      // per-region URLs object
       targetUrl = gf.allowedRegions[region] || gf.fallbackUrl;
     }
     if (!targetUrl) {
@@ -50,10 +63,9 @@ module.exports = async function redirectHandler(req, res) {
     record.url = targetUrl;
   }
 
-  // 5) Password protection (TODO: implement prompt or token check)
+  // 5) Password protection (TODO)
   if (record.passwordProtected) {
-    // e.g. read `req.query.pw` or req.headers['x-qr-password']
-    // if incorrect, return 401 or redirect to an auth page
+    // …
   }
 
   // 6) Device/User-Agent routing
@@ -67,8 +79,9 @@ module.exports = async function redirectHandler(req, res) {
 
   // 7) Time-of-day / Day-of-week routing
   if (record.timeRouting) {
-    const day = now.getDay(); // 0=Sun ... 6=Sat
-    const hr = now.getHours();
+    const date = new Date();
+    const day = date.getDay(); // 0=Sun … 6=Sat
+    const hr = date.getHours();
     const tr = record.timeRouting;
 
     if ((day === 0 || day === 6) && tr.weekendsUrl) {
@@ -80,9 +93,9 @@ module.exports = async function redirectHandler(req, res) {
     }
   }
 
-  // 8) Analytics webhook (TODO: fire async webhook before redirect)
+  // 8) Analytics webhook (TODO)
   if (record.webhookUrl) {
-    // e.g. fetch(record.webhookUrl, { method: 'POST', body: ... })
+    // …
   }
 
   // Increment hits
