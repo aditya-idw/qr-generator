@@ -3,30 +3,23 @@ require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
 const { buildPayload } = require('./backend/qrService');
+const redirectHandler = require('./backend/redirect');
 
 const app = express();
-// parse JSON bodies (for POST)
 app.use(bodyParser.json({ limit: '1mb' }));
 
-// single handler for both GET and POST
 async function handleGenerateQr(req, res) {
-  // prefer query params on GET, else JSON body
-  const source = Object.keys(req.query).length
-    ? req.query
-    : (req.body || {});
+  const source = Object.keys(req.query).length ? req.query : (req.body || {});
   const { payloadType, payloadData, format = 'svg' } = source;
 
   if (!payloadType || !payloadData) {
-    return res
-      .status(400)
-      .json({ error: 'Missing payloadType or payloadData parameters' });
+    return res.status(400).json({ error: 'Missing payloadType or payloadData parameters' });
   }
 
   try {
     const output = await buildPayload({ payloadType, payloadData, format });
 
     if (format === 'svg') {
-      // ensure Supertest treats this as text
       res.setHeader('Content-Type', 'text/svg+xml');
       return res.send(output);
     }
@@ -45,7 +38,10 @@ async function handleGenerateQr(req, res) {
 app.get('/generateQr', handleGenerateQr);
 app.post('/generateQr', handleGenerateQr);
 
-// only start server if run directly (not when `require`d by tests)
+// Dynamic redirect endpoint
+app.get('/r/:key', redirectHandler);
+
+// Only start listening when run directly
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
