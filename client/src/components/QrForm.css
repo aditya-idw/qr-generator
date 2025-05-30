@@ -1,0 +1,52 @@
+/* client/src/components/QrForm.css */
+
+.qr-form {
+  display: grid;
+  grid-gap: 1rem;
+  max-width: 400px;
+  margin: auto;
+}
+
+.qr-form label {
+  display: flex;
+  flex-direction: column;
+  font-weight: bold;
+}
+
+.qr-form input,
+.qr-form select {
+  padding: 0.5rem;
+  font-size: 1rem;
+  margin-top: 0.25rem;
+}
+
+.qr-form button {
+  padding: 0.75rem;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.qr-display {
+  margin-top: 1rem;
+  max-width: 100%;
+}
+
+.error {
+  color: red;
+  margin-top: 0.5rem;
+}
+
+.download-button {
+  display: inline-block;
+  margin-top: 0.75rem;
+  padding: 0.5rem 1rem;
+  font-size: 1rem;
+  text-decoration: none;
+  background-color: #007bff;
+  color: white;
+  border-radius: 4px;
+}
+
+.download-button:hover {
+  background-color: #0056b3;
+}
