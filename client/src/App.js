@@ -20,14 +20,17 @@ function App() {
 
     setLoading(true);
     try {
-      // Build query string for GET
-      const qs = new URLSearchParams({
-        payloadType: 'url',
-        payloadData: payload,
-        format,
+      // POST JSON body to avoid URL length issues
+      const res = await fetch('/generateQr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payloadType: 'url',
+          payloadData: payload,
+          format,
+        }),
       });
 
-      const res = await fetch(`/generateQr?${qs.toString()}`);
       if (!res.ok) {
         const text = await res.text();
         throw new Error(text || res.statusText);

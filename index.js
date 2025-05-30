@@ -25,11 +25,15 @@ app.use(apiKeyRoutes);
  * Shared handler for QR generation.
  */
 async function handleGenerateQr(req, res) {
-  const source = Object.keys(req.query).length ? req.query : (req.body || {});
+  const source = Object.keys(req.query).length
+    ? req.query
+    : req.body || {};
   const { payloadType, payloadData, format = 'svg' } = source;
 
   if (!payloadType || !payloadData) {
-    return res.status(400).json({ error: 'Missing payloadType or payloadData parameters' });
+    return res
+      .status(400)
+      .json({ error: 'Missing payloadType or payloadData parameters' });
   }
 
   try {
@@ -45,6 +49,7 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
+    // Fallback
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -54,16 +59,16 @@ async function handleGenerateQr(req, res) {
 // Public GET endpoint for QR generation
 app.get('/generateQr', handleGenerateQr);
 
-// ─────────────── NEW ROUTE ───────────────
-// Public POST endpoint (for your React front-end)
+// Public POST endpoint for QR generation (for your React front-end)
 app.post('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint (for API-key or JWT clients)
-// we mount this at a different path to avoid conflict
+// Protected POST endpoint for QR generation (JWT or API-key clients)
 app.post(
   '/generateQr/auth',
   (req, res, next) =>
-    req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next),
+    req.get('x-api-key')
+      ? apiKeyAuth(req, res, next)
+      : auth(req, res, next),
   requireRole('user'),
   handleGenerateQr
 );
