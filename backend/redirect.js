@@ -1,9 +1,12 @@
 // backend/redirect.js
+require('dotenv').config();
 const knexConfig = require('../knexfile').development;
 const knex = require('knex')(knexConfig);
+const Redis = require('ioredis');
+const fetch = require('node-fetch');
 
-// In-memory store for timestamps: { "<key>:<ip>": [timestamp, ...] }
-const rateWindows = new Map();
+// Initialize Redis client for distributed rate-limiting
+const redis = new Redis(process.env.REDIS_URL);
 
 module.exports = async function redirectHandler(req, res) {
   const { key } = req.params;
@@ -17,7 +20,7 @@ module.exports = async function redirectHandler(req, res) {
   }
 
   // 1) Expiry check
-  if (record.expiry && new Date(record.expiry) < now) {
+  if (record.expiry && new Date(record.expiry) < new Date(now)) {
     return res.status(410).json({ error: 'QR code has expired' });
   }
 
@@ -26,23 +29,21 @@ module.exports = async function redirectHandler(req, res) {
     return res.status(403).json({ error: 'Click cap reached' });
   }
 
-  // 3) Rate limiting
+  // 3) Distributed rate limiting using Redis sorted sets
   if (record.rateLimit) {
     const { count, perMilliseconds } = record.rateLimit;
-    const windowKey = `${key}:${ip}`;
-    const timestamps = rateWindows.get(windowKey) || [];
-
-    // Filter out timestamps outside the sliding window
+    const windowKey = `rate:${key}:${ip}`;
     const windowStart = now - perMilliseconds;
-    const recent = timestamps.filter(ts => ts > windowStart);
 
-    if (recent.length >= count) {
+    // Remove old entries
+    await redis.zremrangebyscore(windowKey, 0, windowStart);
+    const requests = await redis.zcard(windowKey);
+    if (requests >= count) {
       return res.status(429).json({ error: 'Rate limit exceeded' });
     }
-
-    // Record this hit
-    recent.push(now);
-    rateWindows.set(windowKey, recent);
+    // Add current timestamp and set expiry for the key
+    await redis.zadd(windowKey, now, now);
+    await redis.pexpire(windowKey, perMilliseconds);
   }
 
   // 4) Geo-fence redirection
@@ -51,9 +52,7 @@ module.exports = async function redirectHandler(req, res) {
     const gf = record.geoFence;
     let targetUrl;
     if (Array.isArray(gf.allowedRegions)) {
-      targetUrl = gf.allowedRegions.includes(region)
-        ? record.url
-        : gf.fallbackUrl;
+      targetUrl = gf.allowedRegions.includes(region) ? record.url : gf.fallbackUrl;
     } else {
       targetUrl = gf.allowedRegions[region] || gf.fallbackUrl;
     }
@@ -63,9 +62,12 @@ module.exports = async function redirectHandler(req, res) {
     record.url = targetUrl;
   }
 
-  // 5) Password protection (TODO)
+  // 5) Password protection
   if (record.passwordProtected) {
-    // …
+    const provided = req.query.pw || req.headers['x-qr-password'];
+    if (!provided || provided !== record.password) {
+      return res.status(401).json({ error: 'Password required or incorrect' });
+    }
   }
 
   // 6) Device/User-Agent routing
@@ -93,12 +95,21 @@ module.exports = async function redirectHandler(req, res) {
     }
   }
 
-  // 8) Analytics webhook (TODO)
+  // 8) Analytics webhook (async, non-blocking)
   if (record.webhookUrl) {
-    // …
+    fetch(record.webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        key,
+        ip,
+        timestamp: now,
+        userAgent: req.get('User-Agent'),
+      }),
+    }).catch(err => console.error('Webhook error:', err));
   }
 
-  // Increment hits
+  // Increment hits in the database
   await knex('DynamicQR').where({ id: key }).increment('hits', 1);
 
   // Final redirect
