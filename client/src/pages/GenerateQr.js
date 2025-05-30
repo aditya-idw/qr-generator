@@ -1,5 +1,7 @@
+// client/src/pages/GenerateQr.js
 import React from 'react';
-import QrForm from '../components/QrForm';  // reuse earlier form component
+import QrForm from '../components/QrForm';
+import '../App.css';
 
 export default function GenerateQr() {
   return (
