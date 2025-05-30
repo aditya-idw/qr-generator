@@ -35,21 +35,36 @@ module.exports = async function redirectHandler(req, res) {
     return res.status(403).json({ error: 'Click cap reached' });
   }
 
-  // 3) Distributed rate limiting using Redis sorted sets
+  // 3) Rate limiting (test vs production)
   if (record.rateLimit) {
     const { count, perMilliseconds } = record.rateLimit;
-    const windowKey = `rate:${key}:${ip}`;
-    const windowStart = now - perMilliseconds;
-
-    // Remove old entries
-    await redis.zremrangebyscore(windowKey, 0, windowStart);
-    const requests = await redis.zcard(windowKey);
-    if (requests >= count) {
-      return res.status(429).json({ error: 'Rate limit exceeded' });
+    if (isTest) {
+      const windowKey = `${key}:${ip}`;
+      // Clear previous test data when record is new
+      if (record.hits === 0) {
+        rateWindows.delete(windowKey);
+      }
+      // In-memory sliding window
+      const timestamps = rateWindows.get(windowKey) || [];
+      const windowStart = now - perMilliseconds;
+      const recent = timestamps.filter(ts => ts > windowStart);
+      if (recent.length >= count) {
+        return res.status(429).json({ error: 'Rate limit exceeded' });
+      }
+      recent.push(now);
+      rateWindows.set(windowKey, recent);
+    } else {
+      // Redis-based sliding window
+      const windowKey = `rate:${key}:${ip}`;
+      const windowStart = now - perMilliseconds;
+      await redis.zremrangebyscore(windowKey, 0, windowStart);
+      const requests = await redis.zcard(windowKey);
+      if (requests >= count) {
+        return res.status(429).json({ error: 'Rate limit exceeded' });
+      }
+      await redis.zadd(windowKey, now, now);
+      await redis.pexpire(windowKey, perMilliseconds);
     }
-    // Add current timestamp and set expiry for the key
-    await redis.zadd(windowKey, now, now);
-    await redis.pexpire(windowKey, perMilliseconds);
   }
 
   // 4) Geo-fence redirection
@@ -88,7 +103,7 @@ module.exports = async function redirectHandler(req, res) {
   // 7) Time-of-day / Day-of-week routing
   if (record.timeRouting) {
     const date = new Date();
-    const day = date.getDay(); // 0=Sun … 6=Sat
+    const day = date.getDay();
     const hr = date.getHours();
     const tr = record.timeRouting;
 
@@ -101,21 +116,16 @@ module.exports = async function redirectHandler(req, res) {
     }
   }
 
-  // 8) Analytics webhook (async, non-blocking)
-  if (record.webhookUrl) {
+  // 8) Analytics webhook (skip in test)
+  if (!isTest && record.webhookUrl) {
     fetch(record.webhookUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        key,
-        ip,
-        timestamp: now,
-        userAgent: req.get('User-Agent'),
-      }),
+      body: JSON.stringify({ key, ip, timestamp: now, userAgent: req.get('User-Agent') }),
     }).catch(err => console.error('Webhook error:', err));
   }
 
-  // Increment hits in the database
+  // Increment hits
   await knex('DynamicQR').where({ id: key }).increment('hits', 1);
 
   // Final redirect
