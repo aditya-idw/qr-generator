@@ -14,7 +14,7 @@ function App() {
     setQr(null);
 
     if (!payload.trim()) {
-      setError('Enter a URL or text to encode.');
+      setError('Enter a Target URL to encode.');
       return;
     }
 
@@ -37,12 +37,15 @@ function App() {
       }
 
       if (format === 'svg') {
-        const text = await res.text();
-        setQr({ type: 'svg', data: text });
+        const svgText = await res.text();
+        // Create a blob URL for download
+        const blob = new Blob([svgText], { type: 'image/svg+xml' });
+        const url = URL.createObjectURL(blob);
+        setQr({ type: 'svg', data: svgText, downloadUrl: url });
       } else {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
-        setQr({ type: 'img', data: url });
+        setQr({ type: 'img', data: url, downloadUrl: url });
       }
     } catch (e) {
       setError(e.message);
@@ -57,7 +60,7 @@ function App() {
 
       <div className="form">
         <label>
-          URL or Text:
+          Target URL:
           <input
             type="text"
             value={payload}
@@ -83,14 +86,32 @@ function App() {
       {error && <div className="error">{error}</div>}
 
       {qr && qr.type === 'svg' && (
-        <div
-          className="qr-display"
-          dangerouslySetInnerHTML={{ __html: qr.data }}
-        />
+        <>
+          <div
+            className="qr-display"
+            dangerouslySetInnerHTML={{ __html: qr.data }}
+          />
+          <a
+            className="download-button"
+            href={qr.downloadUrl}
+            download={`qr.${format}`}
+          >
+            Download SVG
+          </a>
+        </>
       )}
 
       {qr && qr.type === 'img' && (
-        <img className="qr-display" src={qr.data} alt="Generated QR" />
+        <>
+          <img className="qr-display" src={qr.data} alt="Generated QR" />
+          <a
+            className="download-button"
+            href={qr.downloadUrl}
+            download={`qr.${format}`}
+          >
+            Download {format.toUpperCase()}
+          </a>
+        </>
       )}
     </div>
   );
