@@ -5,26 +5,38 @@ const express = require('express');
 const { buildPayload } = require('./backend/qrService');
 const redirectHandler = require('./backend/redirect');
 const userRoutes = require('./backend/users');
+const apiKeyRoutes = require('./backend/apiKeys');
 const auth = require('./middleware/auth');
+const apiKeyAuth = require('./middleware/apiKeyAuth');
 const { requireRole } = require('./middleware/permissions');
 
 const app = express();
 
-// JSON parser
+// Parse JSON bodies on all routes
 app.use(express.json({ limit: '1mb' }));
 
-// User registration & login (public)
+// Public user registration & login routes
 app.use(userRoutes);
 
-// QR generation handlers
+// API key management routes
+app.use(apiKeyRoutes);
+
+/**
+ * handleGenerateQr
+ * Shared handler for QR generation. Supports both GET (query params)
+ * and POST (JSON body).
+ */
 async function handleGenerateQr(req, res) {
   const source = Object.keys(req.query).length ? req.query : (req.body || {});
   const { payloadType, payloadData, format = 'svg' } = source;
+
   if (!payloadType || !payloadData) {
-    return res.status(400).json({ error: 'Missing payloadType or payloadData' });
+    return res.status(400).json({ error: 'Missing payloadType or payloadData parameters' });
   }
+
   try {
     const output = await buildPayload({ payloadType, payloadData, format });
+
     if (format === 'svg') {
       res.setHeader('Content-Type', 'text/svg+xml');
       return res.send(output);
@@ -35,38 +47,31 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
+    // Fallback to plain text
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 }
 
-// Public GET endpoint
+// Public GET endpoint for QR generation
 app.get('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint (must be authenticated and have the "user" role)
+// Protected POST endpoint for QR generation
+// Allows either a valid JWT or a valid API key, then enforces 'user' role
 app.post(
   '/generateQr',
-  auth,
+  (req, res, next) => {
+    return req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next);
+  },
   requireRole('user'),
   handleGenerateQr
 );
 
-// Dynamic redirects (no auth, normally)
+// Dynamic redirect endpoint (no auth)
 app.get('/r/:key', redirectHandler);
 
-// Example admin-only route: list all users (requires "admin" role)
-app.get(
-  '/admin/users',
-  auth,
-  requireRole('admin'),
-  async (req, res) => {
-    const users = await require('./backend/usersModel').listAll();
-    res.json(users);
-  }
-);
-
-// Start server
+// Start the server if run directly
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
