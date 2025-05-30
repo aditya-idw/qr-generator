@@ -5,26 +5,24 @@ const express = require('express');
 const { buildPayload } = require('./backend/qrService');
 const redirectHandler = require('./backend/redirect');
 const userRoutes = require('./backend/users');
-const apiKeyRoutes = require('./backend/apiKeys');
+const apiKeyRoutes = require('./backend/apiKeys');   // now a router
 const auth = require('./middleware/auth');
 const apiKeyAuth = require('./middleware/apiKeyAuth');
 const { requireRole } = require('./middleware/permissions');
 
 const app = express();
 
-// Parse JSON bodies on all routes
+// Parse JSON bodies
 app.use(express.json({ limit: '1mb' }));
 
-// Public user registration & login routes
+// Public user registration & login
 app.use(userRoutes);
 
-// API key management routes
+// API key management (router)
 app.use(apiKeyRoutes);
 
 /**
- * handleGenerateQr
- * Shared handler for QR generation. Supports both GET (query params)
- * and POST (JSON body).
+ * Shared handler to generate QR codes.
  */
 async function handleGenerateQr(req, res) {
   const source = Object.keys(req.query).length ? req.query : (req.body || {});
@@ -47,31 +45,27 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
-    // Fallback to plain text
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 }
 
-// Public GET endpoint for QR generation
+// Public GET endpoint
 app.get('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint for QR generation
-// Allows either a valid JWT or a valid API key, then enforces 'user' role
+// Protected POST endpoint: JWT or API key + 'user' role
 app.post(
   '/generateQr',
-  (req, res, next) => {
-    return req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next);
-  },
+  (req, res, next) => req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next),
   requireRole('user'),
   handleGenerateQr
 );
 
-// Dynamic redirect endpoint (no auth)
+// Dynamic redirect
 app.get('/r/:key', redirectHandler);
 
-// Start the server if run directly
+// Start if run directly
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
