@@ -5,24 +5,24 @@ const express = require('express');
 const { buildPayload } = require('./backend/qrService');
 const redirectHandler = require('./backend/redirect');
 const userRoutes = require('./backend/users');
-const apiKeyRoutes = require('./backend/apiKeys');   // now a router
+const apiKeyRoutes = require('./backend/apiKeys');
 const auth = require('./middleware/auth');
 const apiKeyAuth = require('./middleware/apiKeyAuth');
 const { requireRole } = require('./middleware/permissions');
 
 const app = express();
 
-// Parse JSON bodies
+// Parse JSON bodies on all routes
 app.use(express.json({ limit: '1mb' }));
 
-// Public user registration & login
+// Mount user registration & login routes
 app.use(userRoutes);
 
-// API key management (router)
+// Mount API-key management routes
 app.use(apiKeyRoutes);
 
 /**
- * Shared handler to generate QR codes.
+ * Shared handler for QR generation.
  */
 async function handleGenerateQr(req, res) {
   const source = Object.keys(req.query).length ? req.query : (req.body || {});
@@ -36,7 +36,7 @@ async function handleGenerateQr(req, res) {
     const output = await buildPayload({ payloadType, payloadData, format });
 
     if (format === 'svg') {
-      res.setHeader('Content-Type', 'text/svg+xml');
+      res.setHeader('Content-Type', 'image/svg+xml');
       return res.send(output);
     }
     if (format === 'png') {
@@ -51,21 +51,27 @@ async function handleGenerateQr(req, res) {
   }
 }
 
-// Public GET endpoint
+// Public GET endpoint for QR generation
 app.get('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint: JWT or API key + 'user' role
+// ─────────────── NEW ROUTE ───────────────
+// Public POST endpoint (for your React front-end)
+app.post('/generateQr', handleGenerateQr);
+
+// Protected POST endpoint (for API-key or JWT clients)
+// we mount this at a different path to avoid conflict
 app.post(
-  '/generateQr',
-  (req, res, next) => req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next),
+  '/generateQr/auth',
+  (req, res, next) =>
+    req.get('x-api-key') ? apiKeyAuth(req, res, next) : auth(req, res, next),
   requireRole('user'),
   handleGenerateQr
 );
 
-// Dynamic redirect
+// Dynamic redirect endpoint
 app.get('/r/:key', redirectHandler);
 
-// Start if run directly
+// Start the server if this file is run directly
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
