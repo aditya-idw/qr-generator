@@ -3,10 +3,16 @@ require('dotenv').config();
 const knexConfig = require('../knexfile').development;
 const knex = require('knex')(knexConfig);
 const Redis = require('ioredis');
-const fetch = require('node-fetch');
+const { fetch } = require('undici');
+
+// Test mode flag
+const isTest = process.env.NODE_ENV === 'test';
+
+// In-memory rate windows for test mode
+const rateWindows = isTest ? new Map() : null;
 
 // Initialize Redis client for distributed rate-limiting
-const redis = new Redis(process.env.REDIS_URL);
+const redis = !isTest ? new Redis(process.env.REDIS_URL) : null;
 
 module.exports = async function redirectHandler(req, res) {
   const { key } = req.params;
