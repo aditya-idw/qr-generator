@@ -6,32 +6,25 @@ const { buildPayload } = require('./backend/qrService');
 const redirectHandler = require('./backend/redirect');
 const userRoutes = require('./backend/users');
 const auth = require('./middleware/auth');
+const { requireRole } = require('./middleware/permissions');
 
 const app = express();
 
-// Parse JSON bodies on all routes
+// JSON parser
 app.use(express.json({ limit: '1mb' }));
 
-// Mount user registration & login routes
+// User registration & login (public)
 app.use(userRoutes);
 
-/**
- * Handler for QR generation.
- * Supports both GET (query params) and POST (JSON body).
- */
+// QR generation handlers
 async function handleGenerateQr(req, res) {
   const source = Object.keys(req.query).length ? req.query : (req.body || {});
   const { payloadType, payloadData, format = 'svg' } = source;
-
   if (!payloadType || !payloadData) {
-    return res
-      .status(400)
-      .json({ error: 'Missing payloadType or payloadData parameters' });
+    return res.status(400).json({ error: 'Missing payloadType or payloadData' });
   }
-
   try {
     const output = await buildPayload({ payloadType, payloadData, format });
-
     if (format === 'svg') {
       res.setHeader('Content-Type', 'text/svg+xml');
       return res.send(output);
@@ -42,23 +35,38 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
-    // Fallback to plain text
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 }
 
-// Public GET endpoint for QR generation
+// Public GET endpoint
 app.get('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint for QR generation (requires valid JWT)
-app.post('/generateQr', auth, handleGenerateQr);
+// Protected POST endpoint (must be authenticated and have the "user" role)
+app.post(
+  '/generateQr',
+  auth,
+  requireRole('user'),
+  handleGenerateQr
+);
 
-// Dynamic redirect endpoint
+// Dynamic redirects (no auth, normally)
 app.get('/r/:key', redirectHandler);
 
-// Start the server if this file is run directly
+// Example admin-only route: list all users (requires "admin" role)
+app.get(
+  '/admin/users',
+  auth,
+  requireRole('admin'),
+  async (req, res) => {
+    const users = await require('./backend/usersModel').listAll();
+    res.json(users);
+  }
+);
+
+// Start server
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
