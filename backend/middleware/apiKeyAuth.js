@@ -1,6 +1,6 @@
 // middleware/apiKeyAuth.js
-const knex = require('../backend/db');
-const redis = require('../backend/cache');
+const knex = require('../services/db');
+const redis = require('../services/cache');
 
 module.exports = async function apiKeyAuth(req, res, next) {
   const key = req.get('x-api-key');

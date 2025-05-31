@@ -1,9 +1,9 @@
 // backend/apiKeys.js
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const knexConfig = require('../knexfile').development;
+const knexConfig = require('../../knexfile').development;
 const knex = require('./db');
-const auth = require('../middleware/auth');
+const auth = require('../../middleware/auth');
 
 const router = express.Router();
 
