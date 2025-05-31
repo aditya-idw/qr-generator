@@ -2,11 +2,11 @@
 require('dotenv').config();
 
 const express = require('express');
-const { buildPayload } = require('./qrService');
-const redirectHandler = require('./redirect');
-const userRoutes = require('./users');
-const apiKeyRoutes = require('./apiKeys');
-const shortLinkRoutes = require('./shortLink');
+const { buildPayload } = require('./backend/qrService');
+const redirectHandler = require('./backend/redirect');
+const userRoutes = require('./backend/users');
+const apiKeyRoutes = require('./backend/apiKeys');
+const shortLinkRoutes = require('./backend/shortLink');
 const auth = require('../middleware/auth');
 const apiKeyAuth = require('../middleware/apiKeyAuth');
 const { requireRole } = require('../middleware/permissions');
@@ -29,6 +29,7 @@ app.use(shortLinkRoutes);
  * Shared handler for QR generation.
  */
 async function handleGenerateQr(req, res) {
+  // If query string has keys, use req.query; otherwise use req.body
   const source = Object.keys(req.query).length
     ? req.query
     : req.body || {};
@@ -53,7 +54,7 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
-    // Fallback
+    // Fallback to plain text if format is something else
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
@@ -80,7 +81,7 @@ app.post(
 // Dynamic redirect endpoint
 app.get('/r/:key', redirectHandler);
 
-// Start the server if this file is run directly
+// Start the server when run directly
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
