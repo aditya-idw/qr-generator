@@ -1,9 +1,9 @@
 // backend/backend/shortLink.js
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const knex = require('../../db');                  // ← now points up two levels to backend/db.js
-const auth = require('../../middleware/auth');     // ← up two levels to middleware/auth.js
-const { requireRole } = require('../../middleware/permissions'); // ← permissions.js
+const knex = require('../db');                    // <-- one level up to backend/db.js
+const auth = require('../../middleware/auth');     // up two levels to middleware/auth.js
+const { requireRole } = require('../../middleware/permissions'); // up two levels to middleware/permissions.js
 
 const router = express.Router();
 
