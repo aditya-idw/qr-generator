@@ -1,9 +1,9 @@
-// backend/shortLink.js
+// backend/backend/shortLink.js
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const knex = require('./db');
-const auth = require('../../middleware/auth');
-const { requireRole } = require('../../middleware/permissions');
+const knex = require('../db');                       // Adjusted to point one level up to your db setup
+const auth = require('../middleware/auth');          // Now correctly points to ../middleware/auth.js
+const { requireRole } = require('../middleware/permissions'); // Points to ../middleware/permissions.js
 
 const router = express.Router();
 
@@ -27,7 +27,10 @@ router.post(
       // Validate custom key: alphanumeric, dashes/underscores, 3–64 chars
       const valid = /^[A-Za-z0-9_-]{3,64}$/.test(key);
       if (!valid) {
-        return res.status(400).json({ error: 'Custom key must be 3–64 characters: letters, numbers, dash or underscore.' });
+        return res.status(400).json({
+          error:
+            'Custom key must be 3–64 characters: letters, numbers, dash or underscore.',
+        });
       }
       // Ensure uniqueness
       const exists = await knex('DynamicQR').where({ id: key }).first();
