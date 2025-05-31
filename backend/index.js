@@ -1,40 +1,48 @@
 // backend/index.js
 require('dotenv').config();
 
-const express = require('express');
-const { buildPayload } = require('./backend/qrService');
-const redirectHandler = require('./backend/redirect');
-const userRoutes = require('./backend/users');
-const apiKeyRoutes = require('./backend/apiKeys');
-const shortLinkRoutes = require('./backend/shortLink');
-const auth = require('../middleware/auth');
-const apiKeyAuth = require('../middleware/apiKeyAuth');
-const { requireRole } = require('../middleware/permissions');
+const express          = require('express');
+const { buildPayload } = require('./services/qrService');
+const redirectHandler  = require('./services/redirect');
+const userRoutes       = require('./services/users');
+const apiKeyRoutes     = require('./services/apiKeys');
+const shortLinkRoutes  = require('./services/shortLink');
+const auth             = require('./middleware/auth');
+const apiKeyAuth       = require('./middleware/apiKeyAuth');
+const { requireRole }  = require('./middleware/permissions');
 
 const app = express();
 
-// Parse JSON bodies on all routes
+// ──────────────────────────────────────────────────────────────────────────────
+// 1. Parse JSON bodies on all routes
+// ──────────────────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '1mb' }));
 
-// Mount user registration & login routes
+// ──────────────────────────────────────────────────────────────────────────────
+// 2. Mount “service” routers
+//    - userRoutes exposes signup/login endpoints
+//    - apiKeyRoutes handles API‐key CRUD
+//    - shortLinkRoutes handles POST /short-link
+// ──────────────────────────────────────────────────────────────────────────────
 app.use(userRoutes);
-
-// Mount API-key management routes
 app.use(apiKeyRoutes);
-
-// Mount short-link creation route
 app.use(shortLinkRoutes);
 
 /**
- * Shared handler for QR generation.
+ * 3. Shared handler for /generateQr (GET or POST)
+ *
+ *    - Reads either req.query or req.body for:
+ *        { payloadType, payloadData, format }
+ *    - Invokes buildPayload() from ./services/qrService
+ *    - Returns SVG/PNG/JPEG with appropriate Content-Type
  */
 async function handleGenerateQr(req, res) {
-  // If query string has keys, use req.query; otherwise use req.body
+  // Decide whether the client sent JSON in query string vs. request body
   const source = Object.keys(req.query).length
     ? req.query
     : req.body || {};
-  const { payloadType, payloadData, format = 'svg' } = source;
 
+  const { payloadType, payloadData, format = 'svg' } = source;
   if (!payloadType || !payloadData) {
     return res
       .status(400)
@@ -54,20 +62,28 @@ async function handleGenerateQr(req, res) {
     if (format === 'jpg' || format === 'jpeg') {
       return res.type('image/jpeg').send(output);
     }
-    // Fallback to plain text if format is something else
+    // Fallback: send plain text if format isn’t recognized
     return res.type('text/plain').send(output);
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
 }
 
-// Public GET endpoint for QR generation
+// ──────────────────────────────────────────────────────────────────────────────
+// 4. Public QR‐generation endpoints
+//    - GET  /generateQr  (can be invoked via query string)
+//    - POST /generateQr  (can be invoked via JSON body, for React forms)
+// ──────────────────────────────────────────────────────────────────────────────
 app.get('/generateQr', handleGenerateQr);
-
-// Public POST endpoint for QR generation (for your React front-end)
 app.post('/generateQr', handleGenerateQr);
 
-// Protected POST endpoint for QR generation (JWT or API-key clients)
+// ──────────────────────────────────────────────────────────────────────────────
+// 5. Protected QR‐generation endpoint with API‐key or JWT auth
+//    - POST /generateQr/auth
+//    - If X-API-Key header is set, run apiKeyAuth middleware
+//    - Otherwise run JWT‐based auth middleware
+//    - Then enforce `requireRole('user')`, then call handleGenerateQr()
+// ──────────────────────────────────────────────────────────────────────────────
 app.post(
   '/generateQr/auth',
   (req, res, next) =>
@@ -78,13 +94,22 @@ app.post(
   handleGenerateQr
 );
 
-// Dynamic redirect endpoint
+// ──────────────────────────────────────────────────────────────────────────────
+// 6. Dynamic redirect endpoint
+//    GET /r/:key
+//    - Looks up the key in your DynamicQR table, enforces any dynamic rules,
+//      increments hits, then either 302→redirect or 4xx error.
+// ──────────────────────────────────────────────────────────────────────────────
 app.get('/r/:key', redirectHandler);
 
-// Start the server when run directly
+// ──────────────────────────────────────────────────────────────────────────────
+// 7. Start server if run “node index.js” directly
+//    Defaults to port 5000 (or process.env.PORT)
+// ──────────────────────────────────────────────────────────────────────────────
 if (require.main === module) {
   const PORT = process.env.PORT || 5000;
   app.listen(PORT, () => console.log(`🚀 Listening on port ${PORT}`));
 }
 
+// 8. Export for testing
 module.exports = app;
