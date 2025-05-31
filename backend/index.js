@@ -1,14 +1,15 @@
-// index.js
+// backend/index.js
 require('dotenv').config();
 
 const express = require('express');
-const { buildPayload } = require('./backend/qrService');
-const redirectHandler = require('./backend/redirect');
-const userRoutes = require('./backend/users');
-const apiKeyRoutes = require('./backend/apiKeys');
-const auth = require('./middleware/auth');
-const apiKeyAuth = require('./middleware/apiKeyAuth');
-const { requireRole } = require('./middleware/permissions');
+const { buildPayload } = require('./qrService');
+const redirectHandler = require('./redirect');
+const userRoutes = require('./users');
+const apiKeyRoutes = require('./apiKeys');
+const shortLinkRoutes = require('./shortLink');
+const auth = require('../middleware/auth');
+const apiKeyAuth = require('../middleware/apiKeyAuth');
+const { requireRole } = require('../middleware/permissions');
 
 const app = express();
 
@@ -20,6 +21,9 @@ app.use(userRoutes);
 
 // Mount API-key management routes
 app.use(apiKeyRoutes);
+
+// Mount short-link creation route
+app.use(shortLinkRoutes);
 
 /**
  * Shared handler for QR generation.
