@@ -5,7 +5,9 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "test": "cross-env NODE_ENV=test jest"
+    "test": "cross-env NODE_ENV=test jest",
+    "migrate:latest": "knex migrate:latest --knexfile knexfile.js --cwd .",
+    "migrate:rollback": "knex migrate:rollback --knexfile knexfile.js --cwd ."
   },
   "keywords": [
     "qr",
